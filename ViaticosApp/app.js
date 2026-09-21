@@ -132,6 +132,7 @@ function generateItemsForRubro(trip, rubro) {
       presupuesto: rubro.precioUnitario,
       estado: 'pendiente', // pendiente | consumido | ahorro | devolver
       montoReal: null,
+      detalle: [],
       auto: false
     });
   }
@@ -685,8 +686,13 @@ function itemRowHTML(trip, item) {
     const diff = item.presupuesto - Number(item.montoReal);
     if (Math.abs(diff) > 0.005) {
       realLine = `<div class="real up">Gastó ${money(item.montoReal, trip.moneda)} (${diff > 0 ? (tipo === 'ahorro' ? 'ahorró ' : 'devuelve ') : (tipo === 'ahorro' ? 'extra propio ' : 'le reembolsan ')}${money(Math.abs(diff), trip.moneda)})</div>`;
+    } else if (item.detalle && item.detalle.length > 1) {
+      realLine = `<div class="real up">Gastó ${money(item.montoReal, trip.moneda)}</div>`;
     }
   }
+  const detalleLine = (item.detalle && item.detalle.length > 1)
+    ? `<div class="real small">${item.detalle.map(d => esc(d.concepto) || 'Gasto').join(' + ')}</div>`
+    : '';
   return `
     <div class="item-row" data-action="open-item" data-id="${item.id}">
       <div class="top">
@@ -698,6 +704,7 @@ function itemRowHTML(trip, item) {
         <span class="rubro-legend ${tipo}" style="padding:1px 7px">${tipo === 'ahorro' ? 'Ahorro' : 'Reembolsable'}</span>
       </div>
       ${realLine}
+      ${detalleLine}
     </div>`;
 }
 
@@ -792,11 +799,30 @@ function openShortenSheet(trip) {
   updatePreview();
 }
 
+let detalleDraft = [];
+
+function detalleTotal() {
+  return detalleDraft.reduce((s, d) => s + (Number(d.monto) || 0), 0);
+}
+
+function renderDetalleList(trip) {
+  const list = document.getElementById('detalle-list');
+  const totalEl = document.getElementById('detalle-total');
+  if (!list) return;
+  list.innerHTML = detalleDraft.map((d, i) => `
+    <div class="rubro-form-row" style="padding:8px 10px;flex-direction:row;align-items:center;justify-content:space-between">
+      <span class="small">${esc(d.concepto) || 'Gasto'} — ${money(d.monto, trip.moneda)}</span>
+      <button type="button" class="btn-sm btn-ghost" data-action="detalle-remove" data-idx="${i}" style="padding:2px 6px;color:var(--danger)">Quitar</button>
+    </div>`).join('');
+  if (totalEl) totalEl.textContent = money(detalleTotal(), trip.moneda);
+}
+
 function openItemSheet(trip, item) {
   currentItemId = item.id;
   const rubro = rubroMapOf(trip)[item.rubroId];
   const tipo = rubro ? rubro.tipo : 'ahorro';
   const nombre = itemLabel(trip, item);
+  detalleDraft = item.detalle && item.detalle.length ? item.detalle.map(d => ({ ...d })) : [];
 
   const noUsadoBtn = tipo === 'ahorro'
     ? `<button class="btn btn-success" data-action="reg-ahorro">😊 No lo usé — es mío (ahorro)</button>`
@@ -812,18 +838,27 @@ function openItemSheet(trip, item) {
 
     <div class="actions">
       <button class="btn btn-primary" data-action="reg-igual">✅ Gasté igual (${money(item.presupuesto, trip.moneda)})</button>
-      <button class="btn btn-secondary" data-action="reg-diferente-toggle">✏️ Gasté un monto diferente</button>
+      <button class="btn btn-secondary" data-action="reg-diferente-toggle">✏️ Registrar lo que gasté (puedes agregar varios)</button>
       <div id="diferente-box" style="display:none" class="stack">
-        <div class="field">
-          <label for="monto-diferente">Monto que realmente gastaste</label>
-          <input type="number" id="monto-diferente" min="0" step="0.01" inputmode="decimal" value="${item.montoReal != null ? item.montoReal : ''}">
+        <div id="detalle-list" class="stack"></div>
+        <div class="row2">
+          <div class="field"><label for="detalle-concepto">Concepto (opcional)</label><input type="text" id="detalle-concepto" placeholder="Ej. Café"></div>
+          <div class="field"><label for="detalle-monto">Monto</label><input type="number" id="detalle-monto" min="0" step="0.01" inputmode="decimal"></div>
         </div>
-        <button class="btn btn-primary" data-action="reg-diferente-confirm">Guardar monto</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-action="detalle-add">+ Agregar gasto</button>
+        <div class="rf-head"><span class="muted small">Total gastado</span><span class="rf-total" id="detalle-total">${money(0, trip.moneda)}</span></div>
+        <button class="btn btn-primary" data-action="reg-diferente-confirm">Guardar</button>
       </div>
       ${noUsadoBtn}
       <button class="btn btn-danger" data-action="reg-devolver">↩️ No lo usé — debo devolverlo</button>
       ${item.estado !== 'pendiente' ? `<button class="btn btn-ghost" data-action="reg-undo">Volver a pendiente</button>` : ''}
       <button class="btn btn-ghost" data-action="close-sheet">Cancelar</button>
+    </div>
+    <div class="note">
+      Puedes registrar más de un gasto contra este rubro (ej. almuerzo + un café) — se suman para el total. Si el total pasa el presupuesto,
+      ${tipo === 'ahorro'
+        ? ' esa diferencia queda de tu bolsillo, no te la reembolsan.'
+        : ' la empresa te reembolsa la diferencia (este rubro es reembolsable).'}
     </div>
     <div class="note">
       ${tipo === 'ahorro'
@@ -832,12 +867,14 @@ function openItemSheet(trip, item) {
     </div>
   `);
 
+  renderDetalleList(trip);
+
   document.querySelector('[data-action="reg-diferente-toggle"]').addEventListener('click', () => {
     const box = document.getElementById('diferente-box');
     box.style.display = box.style.display === 'none' ? 'flex' : 'none';
     box.style.flexDirection = 'column';
     box.style.gap = '10px';
-    if (box.style.display !== 'none') document.getElementById('monto-diferente').focus();
+    if (box.style.display !== 'none') document.getElementById('detalle-concepto').focus();
   });
 
   document.getElementById('item-fecha-edit').addEventListener('change', (e) => {
@@ -956,6 +993,24 @@ document.addEventListener('click', (e) => {
     case 'reg-ahorro': registrarDesdeSheet('ahorro'); break;
     case 'reg-devolver': registrarDesdeSheet('devolver'); break;
     case 'reg-undo': registrarDesdeSheet('undo'); break;
+    case 'detalle-add': {
+      const trip = getTrip(nav.tripId);
+      const monto = parseFloat(document.getElementById('detalle-monto').value);
+      if (isNaN(monto) || monto <= 0) { showToast('Ingresa un monto válido'); break; }
+      const concepto = document.getElementById('detalle-concepto').value.trim();
+      detalleDraft.push({ concepto, monto });
+      document.getElementById('detalle-concepto').value = '';
+      document.getElementById('detalle-monto').value = '';
+      document.getElementById('detalle-concepto').focus();
+      renderDetalleList(trip);
+      break;
+    }
+    case 'detalle-remove': {
+      const trip = getTrip(nav.tripId);
+      detalleDraft.splice(Number(el.dataset.idx), 1);
+      renderDetalleList(trip);
+      break;
+    }
     case 'add-rubro-existing': {
       const trip = getTrip(nav.tripId);
       openAddRubroSheet(trip);
@@ -993,17 +1048,17 @@ function registrarDesdeSheet(kind) {
   if (!item) return;
 
   if (kind === 'igual') {
-    item.estado = 'consumido'; item.montoReal = item.presupuesto; item.auto = false;
+    item.estado = 'consumido'; item.montoReal = item.presupuesto; item.detalle = []; item.auto = false;
   } else if (kind === 'diferente') {
-    const val = parseFloat(document.getElementById('monto-diferente').value);
-    if (isNaN(val) || val < 0) { showToast('Ingresa un monto válido'); return; }
-    item.estado = 'consumido'; item.montoReal = val; item.auto = false;
+    if (detalleDraft.length === 0) { showToast('Agrega al menos un gasto'); return; }
+    item.estado = 'consumido'; item.montoReal = detalleDraft.reduce((s, d) => s + (Number(d.monto) || 0), 0);
+    item.detalle = detalleDraft.map(d => ({ ...d })); item.auto = false;
   } else if (kind === 'ahorro') {
-    item.estado = 'ahorro'; item.montoReal = 0; item.auto = false;
+    item.estado = 'ahorro'; item.montoReal = 0; item.detalle = []; item.auto = false;
   } else if (kind === 'devolver') {
-    item.estado = 'devolver'; item.montoReal = 0; item.auto = false;
+    item.estado = 'devolver'; item.montoReal = 0; item.detalle = []; item.auto = false;
   } else if (kind === 'undo') {
-    item.estado = 'pendiente'; item.montoReal = null; item.auto = false;
+    item.estado = 'pendiente'; item.montoReal = null; item.detalle = []; item.auto = false;
   }
   saveState();
   closeSheet();

@@ -253,8 +253,8 @@ button, input, select, textarea { font-family: inherit; }
   gap: 8px;
   background: var(--bg-elev);
 }
-.rubro-form-row .rf-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.rubro-form-row .rf-total { font-size: 13px; font-weight: 700; color: var(--primary); }
+.rf-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.rf-total { font-size: 13px; font-weight: 700; color: var(--primary); }
 .checkline { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
 .checkline input { width: 18px; height: 18px; }
 
